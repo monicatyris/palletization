@@ -1,0 +1,9 @@
+pallet:
+  max_width: 120.0
+  max_length: 100.0
+  max_height: 200.0
+  max_weight: 1000.0
+
+conveyor:
+  interval_seconds: 2.0
+  input_file: "data/cajas_entrada.csv" 

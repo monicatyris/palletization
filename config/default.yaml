@@ -1,0 +1,26 @@
+# Configuración del pallet
+pallet:
+  max_width: 100  # cm
+  max_length: 100  # cm
+  max_height: 150  # cm
+  max_weight: 1000  # kg
+
+# Configuración de la simulación
+simulation:
+  interval: 3.0  # segundos entre cajas
+  max_layers: 5  # número máximo de capas
+  stability_check: true  # verificar estabilidad
+
+# Configuración de la visualización
+visualization:
+  box_color: "#1f77b4"  # color de las cajas
+  pallet_color: "#d3d3d3"  # color del pallet
+  alpha: 0.6  # transparencia
+  font_size: 8  # tamaño de fuente para etiquetas
+
+# Configuración de la aplicación web
+web:
+  port: 8501
+  host: "0.0.0.0"
+  theme: "light"
+  debug: false 
