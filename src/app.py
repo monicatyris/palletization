@@ -8,7 +8,13 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet
 from core.box import Box
 from core.pallet import Pallet
-from core.algorithms import first_fit_palletization
+from core.algorithms import (
+    first_fit_palletization,
+    best_fit_decreasing_palletization,
+    first_fit_decreasing_palletization,
+    guillotine_palletization,
+    best_fit_lookahead_palletization
+)
 from visualization.plotter import visualize_pallets, print_palletization_summary
 from config.config import AppConfig, PalletConfig, ConveyorConfig
 import os
@@ -28,6 +34,93 @@ def calculate_pallet_metrics(pallet: Pallet) -> dict:
         "porcentaje_altura": (max((box.position[2] + box.height for box in pallet.boxes), default=0) / 
                             pallet.max_height) * 100
     }
+
+def calculate_pallet_quality(pallet: Pallet) -> tuple:
+    """Calcula la calidad del pallet basada en varios factores."""
+    # 1. Utilización del Volumen (40%)
+    total_volume = pallet.max_width * pallet.max_length * pallet.max_height
+    used_volume = sum(box.volume() for box in pallet.boxes)
+    volume_utilization = used_volume / total_volume if total_volume > 0 else 0
+    
+    # 2. Distribución del Peso (30%)
+    # Calculamos el centro de masa del pallet
+    total_weight = sum(box.weight for box in pallet.boxes)
+    if total_weight > 0:
+        center_x = sum(box.weight * (box.position[0] + box.width/2) for box in pallet.boxes) / total_weight
+        center_y = sum(box.weight * (box.position[1] + box.length/2) for box in pallet.boxes) / total_weight
+        
+        # La distribución ideal sería en el centro del pallet
+        ideal_center_x = pallet.max_width / 2
+        ideal_center_y = pallet.max_length / 2
+        
+        # Calculamos la desviación del centro de masa respecto al centro ideal
+        deviation_x = abs(center_x - ideal_center_x) / (pallet.max_width / 2)
+        deviation_y = abs(center_y - ideal_center_y) / (pallet.max_length / 2)
+        
+        # La distribución del peso es mejor cuanto más cerca esté del centro
+        weight_distribution = 1 - (deviation_x + deviation_y) / 2
+    else:
+        weight_distribution = 0
+    
+    # 3. Estabilidad de la Carga (20%)
+    stability_score = 1.0
+    for box in pallet.boxes:
+        # Verificamos si la caja tiene soporte debajo
+        has_support = False
+        for other_box in pallet.boxes:
+            if other_box != box:
+                # La caja tiene soporte si hay otra caja debajo que la soporte
+                if (other_box.position[2] + other_box.height == box.position[2] and
+                    other_box.position[0] <= box.position[0] + box.width and
+                    other_box.position[0] + other_box.width >= box.position[0] and
+                    other_box.position[1] <= box.position[1] + box.length and
+                    other_box.position[1] + other_box.length >= box.position[1]):
+                    has_support = True
+                    break
+        
+        # Si la caja está en el suelo, tiene soporte
+        if box.position[2] == 0:
+            has_support = True
+        
+        if not has_support:
+            stability_score -= 0.1  # Penalizamos por cada caja sin soporte
+    
+    # 4. Utilización de la Altura (10%)
+    max_height = max((box.position[2] + box.height for box in pallet.boxes), default=0)
+    height_utilization = max_height / pallet.max_height if pallet.max_height > 0 else 0
+    
+    # Pesos de cada componente
+    weights = {
+        'volume': 0.40,
+        'weight': 0.30,
+        'stability': 0.20,
+        'height': 0.10
+    }
+    
+    # Cálculo de la puntuación total
+    quality_score = (
+        volume_utilization * weights['volume'] +
+        weight_distribution * weights['weight'] +
+        stability_score * weights['stability'] +
+        height_utilization * weights['height']
+    )
+    
+    # Aseguramos que los valores estén entre 0 y 1
+    quality_score = max(0, min(1, quality_score))
+    volume_utilization = max(0, min(1, volume_utilization))
+    weight_distribution = max(0, min(1, weight_distribution))
+    stability_score = max(0, min(1, stability_score))
+    height_utilization = max(0, min(1, height_utilization))
+    
+    quality_components = {
+        'volume_utilization': volume_utilization,
+        'weight_distribution': weight_distribution,
+        'stability_score': stability_score,
+        'height_utilization': height_utilization,
+        'weights': weights
+    }
+    
+    return quality_score, quality_components
 
 def generate_pdf_report(history, pallets):
     """Genera un reporte PDF con el historial de la simulación."""
@@ -155,6 +248,8 @@ def main():
         st.session_state["simulation_complete"] = False
     if "last_update_time" not in st.session_state:
         st.session_state["last_update_time"] = time.time()
+    if "algorithm" not in st.session_state:
+        st.session_state["algorithm"] = "First-Fit"
     
     # Sidebar para configuración
     with st.sidebar:
@@ -198,6 +293,30 @@ def main():
                 step=0.5
             )
             
+            # Selección del algoritmo de palletización
+            st.subheader("Algoritmo de Palletización")
+            algorithm = st.selectbox(
+                "Seleccionar algoritmo",
+                options=[
+                    "First-Fit",
+                    "Best-Fit Decreasing",
+                    "First-Fit Decreasing",
+                    "Guillotine",
+                    "Best-Fit Lookahead"
+                ],
+                index=0
+            )
+            
+            # Configuración específica para Best-Fit Lookahead
+            if algorithm == "Best-Fit Lookahead":
+                lookahead = st.number_input(
+                    "Número de cajas a mirar adelante",
+                    min_value=1,
+                    max_value=10,
+                    value=3,
+                    step=1
+                )
+            
             # Obtener lista de archivos CSV en el directorio data
             data_files = [f for f in os.listdir("data") if f.endswith('.csv')]
             input_file = st.selectbox(
@@ -224,13 +343,16 @@ def main():
                     pallet=pallet_config,
                     conveyor=conveyor_config
                 )
+                st.session_state["algorithm"] = algorithm
+                if algorithm == "Best-Fit Lookahead":
+                    st.session_state["lookahead"] = lookahead
                 st.success("Configuración actualizada correctamente")
     
     # Crear dos columnas principales
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.header("Visualización en Tiempo Real")
+        st.header("📊 Visualización en Tiempo Real")
         
         # Crear contenedor específico para el control de rotación
         rotation_container = st.empty()
@@ -240,7 +362,7 @@ def main():
             with rotation_container.container():
                 with st.form("rotation_form"):
                     rotation_angle = st.slider(
-                        "Ángulo de rotación", 
+                        "🔄 Ángulo de rotación", 
                         0, 360, 
                         st.session_state["rotation_angle"],
                         key="rotation_slider"
@@ -249,7 +371,7 @@ def main():
                         st.session_state["rotation_angle"] = rotation_angle
         else:
             with rotation_container.container():
-                st.info("El control de rotación estará disponible cuando la simulación esté completa")
+                st.info("ℹ️ El control de rotación estará disponible cuando la simulación esté completa")
         
         # Crear contenedor para la visualización 3D
         visualization_container = st.empty()
@@ -262,17 +384,19 @@ def main():
         
         # Crear contenedor para las métricas del pallet actual
         metrics_container = st.empty()
+        
+        # Crear contenedor para la tabla de historial
+        history_container = st.empty()
     
     with col2:
-        st.header("Controles y Estado")
+        st.header("🎮 Controles y Estado")
         
         if not st.session_state["simulation_running"] and not st.session_state["simulation_complete"]:
-            if st.button("Iniciar Simulación"):
+            if st.button("▶️ Iniciar Simulación", type="primary"):
                 st.session_state["simulation_running"] = True
+                st.session_state["simulation_complete"] = False
                 st.session_state["pallets"] = []
-                st.session_state["boxes"] = []
                 st.session_state["history"] = []
-                st.session_state["last_update_time"] = time.time()
                 
                 # Cargar cajas desde el archivo CSV
                 try:
@@ -297,7 +421,7 @@ def main():
                         
                         # Actualizar información de la caja actual
                         current_box_info.markdown(f"""
-                        ### Caja Actual
+                        ### 📦 Caja Actual
                         - **ID:** {box.id}
                         - **Dimensiones:** {box.width}x{box.length}x{box.height} cm
                         - **Peso:** {box.weight} kg
@@ -306,14 +430,48 @@ def main():
                         
                         st.session_state["boxes"].append(box)
                         
-                        # Realizar paletización
-                        st.session_state["pallets"] = first_fit_palletization(
-                            st.session_state["boxes"],
-                            max_width=st.session_state["config"].pallet.max_width,
-                            max_length=st.session_state["config"].pallet.max_length,
-                            max_height=st.session_state["config"].pallet.max_height,
-                            max_weight=st.session_state["config"].pallet.max_weight
-                        )
+                        # Realizar paletización según el algoritmo seleccionado
+                        if st.session_state["algorithm"] == "First-Fit":
+                            st.session_state["pallets"] = first_fit_palletization(
+                                st.session_state["boxes"],
+                                max_width=st.session_state["config"].pallet.max_width,
+                                max_length=st.session_state["config"].pallet.max_length,
+                                max_height=st.session_state["config"].pallet.max_height,
+                                max_weight=st.session_state["config"].pallet.max_weight
+                            )
+                        elif st.session_state["algorithm"] == "Best-Fit Decreasing":
+                            st.session_state["pallets"] = best_fit_decreasing_palletization(
+                                st.session_state["boxes"],
+                                max_width=st.session_state["config"].pallet.max_width,
+                                max_length=st.session_state["config"].pallet.max_length,
+                                max_height=st.session_state["config"].pallet.max_height,
+                                max_weight=st.session_state["config"].pallet.max_weight
+                            )
+                        elif st.session_state["algorithm"] == "First-Fit Decreasing":
+                            st.session_state["pallets"] = first_fit_decreasing_palletization(
+                                st.session_state["boxes"],
+                                max_width=st.session_state["config"].pallet.max_width,
+                                max_length=st.session_state["config"].pallet.max_length,
+                                max_height=st.session_state["config"].pallet.max_height,
+                                max_weight=st.session_state["config"].pallet.max_weight
+                            )
+                        elif st.session_state["algorithm"] == "Guillotine":
+                            st.session_state["pallets"] = guillotine_palletization(
+                                st.session_state["boxes"],
+                                max_width=st.session_state["config"].pallet.max_width,
+                                max_length=st.session_state["config"].pallet.max_length,
+                                max_height=st.session_state["config"].pallet.max_height,
+                                max_weight=st.session_state["config"].pallet.max_weight
+                            )
+                        elif st.session_state["algorithm"] == "Best-Fit Lookahead":
+                            st.session_state["pallets"] = best_fit_lookahead_palletization(
+                                st.session_state["boxes"],
+                                max_width=st.session_state["config"].pallet.max_width,
+                                max_length=st.session_state["config"].pallet.max_length,
+                                max_height=st.session_state["config"].pallet.max_height,
+                                max_weight=st.session_state["config"].pallet.max_weight,
+                                lookahead=st.session_state.get("lookahead", 3)
+                            )
                         
                         # Actualizar visualización 3D
                         fig = visualize_pallets(st.session_state["pallets"], 
@@ -323,14 +481,32 @@ def main():
                         # Actualizar métricas del pallet actual
                         if st.session_state["pallets"]:
                             metrics = calculate_pallet_metrics(st.session_state["pallets"][-1])
-                            metrics_container.markdown(f"""
-                            ### Métricas del Pallet Actual
-                            | Métrica | Valor | Porcentaje |
-                            |---------|--------|------------|
-                            | Peso | {metrics['peso_utilizado']:.1f} kg | {metrics['porcentaje_peso']:.1f}% |
-                            | Volumen | {metrics['volumen_utilizado']:.1f} cm³ | {metrics['porcentaje_volumen']:.1f}% |
-                            | Altura | {metrics['altura_utilizada']:.1f} cm | {metrics['porcentaje_altura']:.1f}% |
-                            """)
+                            quality_score, quality_components = calculate_pallet_quality(st.session_state["pallets"][-1])
+                            
+                            # Crear tres columnas para las métricas
+                            with metrics_container.container():
+                                col_metrics1, col_metrics2, col_metrics3 = st.columns(3)
+                                
+                                with col_metrics1:
+                                    st.metric(
+                                        "Peso del Pallet",
+                                        f"{metrics['peso_utilizado']:.1f} kg",
+                                        f"{metrics['porcentaje_peso']:.1f}% del máximo"
+                                    )
+                                
+                                with col_metrics2:
+                                    st.metric(
+                                        "Volumen Utilizado",
+                                        f"{metrics['volumen_utilizado']:.1f} cm³",
+                                        f"{metrics['porcentaje_volumen']:.1f}% del total"
+                                    )
+                                
+                                with col_metrics3:
+                                    st.metric(
+                                        "Altura Utilizada",
+                                        f"{metrics['altura_utilizada']:.1f} cm",
+                                        f"{metrics['porcentaje_altura']:.1f}% del máximo"
+                                    )
                             
                             # Guardar en el historial
                             st.session_state["history"].append({
@@ -338,9 +514,16 @@ def main():
                                 "box_id": box.id,
                                 "dimensions": f"{box.width}x{box.length}x{box.height}",
                                 "weight": box.weight,
-                                "metrics": metrics
+                                "metrics": metrics,
+                                "quality_score": quality_score,
+                                "quality_components": quality_components
                             })
                         
+                        # Mostrar tabla de historial actualizada
+                        with history_container.container():
+                            st.subheader("Historial de Colocación")
+                            st.dataframe(pd.DataFrame(st.session_state["history"]))
+                            
                         # Esperar el intervalo configurado
                         time.sleep(st.session_state["config"].conveyor.interval_seconds)
                     
@@ -353,52 +536,127 @@ def main():
                     # Forzar la actualización del contenedor de rotación
                     with rotation_container.container():
                         st.session_state["rotation_angle"] = st.slider(
-                            "Ángulo de rotación", 
+                            "🔄 Ángulo de rotación", 
                             0, 360, 
                             st.session_state["rotation_angle"],
                             key="rotation_slider"
                         )
                     
-                    # Mostrar resumen final
-                    st.markdown("### Resumen Final")
-                    st.write(f"**Pallets utilizados:** {len(st.session_state['pallets'])}")
-                    st.write(f"**Cajas totales:** {len(st.session_state['boxes'])}")
-                    st.write(f"**Cajas por pallet:** {len(st.session_state['boxes']) / len(st.session_state['pallets']):.1f}")
+                    # Mostrar resumen final con tarjetas
+                    with st.container():
+                        st.markdown("### 📊 Resumen Final")
+                        col_summary1, col_summary2, col_summary3 = st.columns(3)
+                        
+                        with col_summary1:
+                            st.metric(
+                                "Pallets Utilizados",
+                                len(st.session_state['pallets']),
+                                "Total"
+                            )
+                        
+                        with col_summary2:
+                            st.metric(
+                                "Cajas Totales",
+                                len(st.session_state['boxes']),
+                                "Procesadas"
+                            )
+                        
+                        with col_summary3:
+                            st.metric(
+                                "Cajas por Pallet",
+                                f"{len(st.session_state['boxes']) / len(st.session_state['pallets']):.1f}",
+                                "Promedio"
+                            )
                     
-                    # Mostrar historial
-                    st.markdown("### Historial de Actualizaciones")
-                    history_df = pd.DataFrame(st.session_state["history"])
-                    st.dataframe(history_df)
+                    # Mostrar métricas de calidad al final de la simulación
+                    if st.session_state["pallets"]:
+                        quality_score, quality_components = calculate_pallet_quality(st.session_state["pallets"][-1])
+                        with st.expander("📊 Métricas de Calidad del Pallet", expanded=False):
+                            # Puntuación general
+                            st.metric(
+                                "Puntuación General",
+                                f"{quality_score:.2f}",
+                                "de 1.0"
+                            )
+                            
+                            # Componentes individuales
+                            col_quality1, col_quality2 = st.columns(2)
+                            
+                            with col_quality1:
+                                st.markdown("#### Componentes")
+                                st.metric(
+                                    "Utilización del Volumen",
+                                    f"{quality_components['volume_utilization']:.2f}",
+                                    f"({quality_components['weights']['volume']*100:.0f}% del total)"
+                                )
+                                st.metric(
+                                    "Distribución del Peso",
+                                    f"{quality_components['weight_distribution']:.2f}",
+                                    f"({quality_components['weights']['weight']*100:.0f}% del total)"
+                                )
+                            
+                            with col_quality2:
+                                st.markdown("#### Componentes")
+                                st.metric(
+                                    "Estabilidad de la Carga",
+                                    f"{quality_components['stability_score']:.2f}",
+                                    f"({quality_components['weights']['stability']*100:.0f}% del total)"
+                                )
+                                st.metric(
+                                    "Utilización de la Altura",
+                                    f"{quality_components['height_utilization']:.2f}",
+                                    f"({quality_components['weights']['height']*100:.0f}% del total)"
+                                )
+                            
+                            # Explicación actualizada de la métrica
+                            st.markdown("""
+                            #### 📝 Explicación de la Métrica
+                            
+                            La calidad del pallet se calcula considerando cuatro factores:
+                            
+                            1. **Utilización del Volumen** (40%):
+                               - Calcula la proporción del volumen total del pallet que está siendo utilizado
+                               - Se obtiene dividiendo el volumen total de las cajas entre el volumen máximo del pallet
+                               - Valores altos indican mejor aprovechamiento del espacio
+                            
+                            2. **Distribución del Peso** (30%):
+                               - Calcula el centro de masa del pallet
+                               - Compara la posición del centro de masa con el centro ideal del pallet
+                               - La puntuación es mejor cuanto más cerca esté el centro de masa del centro del pallet
+                               - Valores altos indican mejor balance del peso
+                            
+                            3. **Estabilidad de la Carga** (20%):
+                               - Verifica que cada caja tenga soporte adecuado
+                               - Una caja tiene soporte si:
+                                 - Está en el suelo (posición z = 0)
+                                 - O hay otra caja debajo que la soporte completamente
+                               - Penaliza con -0.1 por cada caja que no tenga soporte adecuado
+                               - Valores altos indican mejor estabilidad
+                            
+                            4. **Utilización de la Altura** (10%):
+                               - Calcula la proporción de la altura máxima del pallet que está siendo utilizada
+                               - Se obtiene dividiendo la altura máxima alcanzada entre la altura máxima permitida
+                               - Valores altos indican mejor aprovechamiento vertical
+                            """)
                     
                 except Exception as e:
                     st.error(f"Error al cargar el archivo: {str(e)}")
                     st.session_state["simulation_running"] = False
                     st.session_state["simulation_complete"] = False
         
-        # Mostrar resumen e historial si la simulación está completa
-        if st.session_state["simulation_complete"]:
-            st.markdown("### Resumen Final")
-            st.write(f"**Pallets utilizados:** {len(st.session_state['pallets'])}")
-            st.write(f"**Cajas totales:** {len(st.session_state['boxes'])}")
-            st.write(f"**Cajas por pallet:** {len(st.session_state['boxes']) / len(st.session_state['pallets']):.1f}")
-            
-            st.markdown("### Historial de Actualizaciones")
-            history_df = pd.DataFrame(st.session_state["history"])
-            st.dataframe(history_df)
-    
-    # Botón de descarga del PDF (fuera del bloque de simulación)
-    if st.session_state["simulation_complete"] and st.session_state["history"]:
-        st.markdown("---")
-        st.markdown("### Generar Reporte")
-        if st.button("Generar Reporte PDF"):
-            with st.spinner("Generando reporte PDF..."):
-                pdf_buffer = generate_pdf_report(st.session_state["history"], st.session_state["pallets"])
-                st.download_button(
-                    label="Descargar Reporte PDF",
-                    data=pdf_buffer,
-                    file_name=f"palletization_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                    mime="application/pdf"
-                )
+        # Botón de descarga del PDF (fuera del bloque de simulación)
+        if st.session_state["simulation_complete"] and st.session_state["history"]:
+            st.markdown("---")
+            st.markdown("### 📄 Generar Reporte")
+            if st.button("📥 Generar Reporte PDF", type="primary"):
+                with st.spinner("🔄 Generando reporte PDF..."):
+                    pdf_buffer = generate_pdf_report(st.session_state["history"], st.session_state["pallets"])
+                    st.download_button(
+                        label="📥 Descargar Reporte PDF",
+                        data=pdf_buffer,
+                        file_name=f"palletization_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                        mime="application/pdf"
+                    )
 
 if __name__ == "__main__":
     main() 
