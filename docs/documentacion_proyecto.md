@@ -113,152 +113,94 @@ id,width,length,height,weight
 ## 5.1 Investigación de Algoritmos de Paletización
 
 ### 5.1.1 Análisis de Algoritmos Existentes
-Durante la investigación inicial, se analizaron varios algoritmos clásicos de paletización:
+Durante la investigación inicial, se analizaron varios algoritmos de paletización, cada uno con sus propias ventajas y limitaciones:
 
-1. **Algoritmos de Primera Clase**
-   - First-Fit
-   - Best-Fit
-   - Next-Fit
-   - Características: Simples, rápidos, pero con limitaciones en la optimización del espacio
+1. **Algoritmos de Primera Generación**
+   - **First-Fit (FF)**
+     - Enfoque simple y directo
+     - Coloca cada caja en el primer pallet disponible que pueda contenerla
+     - Ventaja: Implementación sencilla y rápida
+     - Desventaja: Puede resultar en una utilización subóptima del espacio
 
-2. **Algoritmos de Segunda Clase**
-   - First-Fit Decreasing
-   - Best-Fit Decreasing
-   - Características: Mejor utilización del espacio, pero requieren ordenamiento previo
+   - **Best-Fit (BF)**
+     - Busca el pallet que mejor se ajuste para cada caja
+     - Ventaja: Mejor utilización del espacio que First-Fit
+     - Desventaja: Mayor complejidad computacional
 
-3. **Algoritmos de Tercera Clase**
-   - Guillotine
-   - Skyline
-   - Características: Consideran la geometría del espacio, más complejos pero más eficientes
+2. **Algoritmos de Segunda Generación**
+   - **First-Fit Decreasing (FFD)**
+     - Ordena las cajas por volumen de mayor a menor
+     - Aplica la estrategia First-Fit sobre cajas ordenadas
+     - Ventaja: Mejor utilización del espacio que FF
+     - Desventaja: Requiere ordenamiento previo
 
-### 5.1.2 Selección de Algoritmos para Implementación
-Se seleccionaron los siguientes algoritmos para implementación basándose en:
-- Complejidad computacional
-- Eficiencia en la utilización del espacio
-- Adaptabilidad a diferentes tipos de cajas
-- Facilidad de implementación
+   - **Best-Fit Decreasing (BFD)**
+     - Ordena las cajas por volumen de mayor a menor
+     - Aplica la estrategia Best-Fit sobre cajas ordenadas
+     - Ventaja: Mejor utilización del espacio que FFD
+     - Desventaja: Mayor tiempo de procesamiento
 
-1. **First-Fit**
-   - Implementación inicial como base de referencia
-   - Complejidad: O(n)
-   - Ventajas: Simple y rápido
-   - Desventajas: Puede dejar espacios vacíos significativos
+3. **Algoritmos de Tercera Generación**
+   - **Guillotine**
+     - Divide el espacio del pallet en rectángulos
+     - Optimiza el uso del espacio considerando cortes
+     - Ventaja: Eficiente para cajas de tamaños similares
+     - Desventaja: Puede dejar espacios inutilizables
 
-2. **Best-Fit Decreasing**
-   - Mejora significativa en la utilización del espacio
-   - Complejidad: O(n log n) por el ordenamiento
-   - Ventajas: Mejor aprovechamiento del espacio
-   - Desventajas: Mayor tiempo de procesamiento
+   - **Best-Fit Lookahead (BFL)**
+     - Considera las próximas N cajas al decidir dónde colocar la caja actual
+     - Implementa un sistema de puntuación multicriterio
+     - Ventaja: Mejor toma de decisiones considerando el futuro
+     - Desventaja: Mayor complejidad y tiempo de procesamiento
 
-3. **First-Fit Decreasing**
-   - Balance entre velocidad y eficiencia
-   - Complejidad: O(n log n)
-   - Ventajas: Buen rendimiento general
-   - Desventajas: No siempre encuentra la solución óptima
+### 5.1.2 Selección del Algoritmo Base
+Después del análisis, se seleccionó el algoritmo Best-Fit Lookahead como base por las siguientes razones:
 
-4. **Guillotine**
-   - Enfoque geométrico avanzado
-   - Complejidad: O(n²)
-   - Ventajas: Excelente para cajas de tamaños similares
-   - Desventajas: Más complejo de implementar
+1. **Ventajas Competitivas**
+   - Mejor utilización del espacio
+   - Consideración de futuras cajas
+   - Sistema de puntuación multicriterio
+   - Adaptabilidad a diferentes escenarios
 
-5. **Best-Fit Lookahead (Desarrollo Propio)**
-   - Algoritmo híbrido que combina características de los anteriores
-   - Complejidad: O(n²)
-   - Características innovadoras:
-     - Consideración de cajas futuras
-     - Sistema de puntuación multidimensional
-     - Optimización de múltiples factores simultáneamente
+2. **Sistema de Puntuación**
+   El algoritmo utiliza un sistema de puntuación ponderado:
+   - Utilización del espacio (40%)
+   - Potencial para cajas futuras (30%)
+   - Estabilidad (20%)
+   - Distribución del peso (10%)
 
-## 5.2 Diseño del Algoritmo Best-Fit Lookahead
+### 5.1.3 Mejoras Implementadas
+Se han implementado varias mejoras al algoritmo base:
 
-### 5.2.1 Estructura General
-```python
-def best_fit_lookahead_palletization(boxes, pallet_dimensions, lookahead=3):
-    # 1. Ordenar cajas por volumen (decreciente)
-    # 2. Inicializar lista de pallets
-    # 3. Para cada caja:
-    #    a. Obtener las siguientes N cajas (lookahead)
-    #    b. Evaluar todas las posiciones posibles
-    #    c. Calcular score para cada posición
-    #    d. Seleccionar mejor posición
-    #    e. Actualizar estado del pallet
-```
+1. **Optimización de la Búsqueda**
+   - Reducción del espacio de búsqueda
+   - Implementación de heurísticas para acelerar la toma de decisiones
+   - Caché de resultados para posiciones frecuentes
 
-### 5.2.2 Sistema de Puntuación
-El algoritmo utiliza un sistema de puntuación multidimensional:
+2. **Sistema de Validación**
+   - Verificación de restricciones en tiempo real
+   - Validación de estabilidad
+   - Comprobación de límites de peso
 
-1. **Utilización del Espacio (40%)**
-   - Calcula el volumen ocupado vs. volumen total
-   - Considera espacios vacíos
-   - Evalúa la compactación de las cajas
+3. **Métricas de Calidad**
+   - Implementación de sistema de puntuación detallado
+   - Monitoreo en tiempo real
+   - Historial de decisiones
 
-2. **Potencial para Cajas Futuras (30%)**
-   - Analiza las N siguientes cajas
-   - Evalúa la compatibilidad de tamaños
-   - Predice la utilización del espacio restante
+### 5.1.4 Resultados Esperados
+El algoritmo subóptimo diseñado se espera que logre:
 
-3. **Estabilidad (20%)**
-   - Verifica el soporte de cada caja
-   - Evalúa el centro de masa
-   - Considera la distribución del peso
+1. **Eficiencia**
+   - Utilización del espacio > 85%
+   - Tiempo de procesamiento < 1 segundo por caja
+   - Estabilidad de carga > 90%
 
-4. **Distribución del Peso (10%)**
-   - Calcula el centro de masa
-   - Evalúa el balance del pallet
-   - Considera restricciones de peso máximo
+2. **Flexibilidad**
+   - Adaptación a diferentes tipos de cajas
+   - Manejo de restricciones variables
+   - Escalabilidad para diferentes volúmenes
 
-### 5.2.3 Optimizaciones Implementadas
-
-1. **Preprocesamiento**
-   - Ordenamiento eficiente de cajas
-   - Filtrado de cajas inviables
-   - Agrupación por características similares
-
-2. **Evaluación de Posiciones**
-   - Uso de estructuras de datos espaciales
-   - Cálculo rápido de intersecciones
-   - Memoización de resultados intermedios
-
-3. **Gestión de Memoria**
-   - Reutilización de estructuras de datos
-   - Limpieza periódica de estados intermedios
-   - Optimización de uso de memoria
-
-## 5.3 Resultados y Comparativas
-
-### 5.3.1 Métricas de Rendimiento
-- Tiempo de ejecución promedio
-- Utilización del espacio
-- Número de pallets utilizados
-- Estabilidad de la carga
-
-### 5.3.2 Comparativa entre Algoritmos
-| Algoritmo | Tiempo | Espacio | Estabilidad | Complejidad |
-|-----------|--------|---------|-------------|-------------|
-| First-Fit | O(n)   | 65-75%  | Media       | Baja        |
-| Best-Fit  | O(n²)  | 75-85%  | Alta        | Media       |
-| Lookahead | O(n²)  | 80-90%  | Muy Alta    | Alta        |
-
-## 5.4 Conclusiones y Mejoras Futuras
-
-### 5.4.1 Conclusiones
-- El algoritmo Best-Fit Lookahead demuestra mejor rendimiento general
-- La consideración de cajas futuras mejora significativamente la utilización del espacio
-- El sistema de puntuación multidimensional permite optimizar múltiples factores simultáneamente
-
-### 5.4.2 Mejoras Propuestas
-1. **Optimizaciones de Rendimiento**
-   - Paralelización del cálculo de scores
-   - Mejora en las estructuras de datos espaciales
-   - Reducción de la complejidad computacional
-
-2. **Mejoras en la Calidad**
-   - Refinamiento del sistema de puntuación
-   - Consideración de más factores en la evaluación
-   - Mejora en la predicción de cajas futuras
-
-3. **Extensiones**
-   - Soporte para cajas irregulares
-   - Consideración de restricciones adicionales
-   - Integración con sistemas de aprendizaje automático 
+3. **Calidad**
+   - Distribución uniforme del peso
+   - Estabilidad garantizada
+   - Optimización del espacio vertical 

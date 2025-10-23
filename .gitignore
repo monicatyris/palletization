@@ -49,11 +49,32 @@ logs/
 data/*.csv
 !data/cajas_entrada.csv
 !data/cajas_entrada_prueba.csv
+!data/datos_para_paletizacion.csv
+!data/datos_para_paletizacion_variado.csv
+!data/datos_para_paletizacion_extendido.csv
 
 # Configuración
 .env
 .env.local
 .env.*.local
+config/secrets.toml
+.streamlit/
+
+# Entornos virtuales específicos del proyecto
+palletization_dhl/
+env/
+
+# Archivos de prueba temporales
+test_*.py
+test_*.json
+*_test.py
+
+# Jupyter notebooks temporales
+notebooks/
+
+# Archivos de generación de datos
+generate_extended_data.py
+normalize_csv_orientations.py
 
 # Docker
 .docker/

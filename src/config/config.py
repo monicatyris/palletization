@@ -1,11 +1,11 @@
 from dataclasses import dataclass
-from typing import Dict, Any
+from typing import Dict, Any, List
 import yaml
 import os
 
 @dataclass
 class PalletConfig:
-    """Configuración de los pallets."""
+    """Configuración de un pallet individual."""
     max_width: float = 120.0  # cm
     max_length: float = 100.0  # cm
     max_height: float = 200.0  # cm
@@ -20,7 +20,7 @@ class ConveyorConfig:
 @dataclass
 class AppConfig:
     """Configuración general de la aplicación."""
-    pallet: PalletConfig
+    pallets: List[PalletConfig]  # Lista de configuraciones de pallets
     conveyor: ConveyorConfig
 
 def load_config(config_path: str = "config/default_config.yaml") -> AppConfig:
@@ -36,18 +36,25 @@ def load_config(config_path: str = "config/default_config.yaml") -> AppConfig:
     if not os.path.exists(config_path):
         # Si no existe el archivo, usar valores por defecto
         return AppConfig(
-            pallet=PalletConfig(),
+            pallets=[PalletConfig()],  # Un pallet por defecto
             conveyor=ConveyorConfig()
         )
     
     with open(config_path, 'r') as f:
         config_data = yaml.safe_load(f)
     
-    pallet_config = PalletConfig(**config_data.get('pallet', {}))
+    # Cargar configuración de pallets
+    pallets_data = config_data.get('pallets', [{}])
+    pallets_config = [PalletConfig(**pallet_data) for pallet_data in pallets_data]
+    
+    # Si no hay pallets configurados, usar uno por defecto
+    if not pallets_config:
+        pallets_config = [PalletConfig()]
+    
     conveyor_config = ConveyorConfig(**config_data.get('conveyor', {}))
     
     return AppConfig(
-        pallet=pallet_config,
+        pallets=pallets_config,
         conveyor=conveyor_config
     )
 
@@ -60,12 +67,15 @@ def save_config(config: AppConfig, config_path: str = "config/default_config.yam
         config_path: Ruta donde guardar el archivo de configuración
     """
     config_dict = {
-        'pallet': {
-            'max_width': config.pallet.max_width,
-            'max_length': config.pallet.max_length,
-            'max_height': config.pallet.max_height,
-            'max_weight': config.pallet.max_weight
-        },
+        'pallets': [
+            {
+                'max_width': pallet.max_width,
+                'max_length': pallet.max_length,
+                'max_height': pallet.max_height,
+                'max_weight': pallet.max_weight
+            }
+            for pallet in config.pallets
+        ],
         'conveyor': {
             'interval_seconds': config.conveyor.interval_seconds,
             'input_file': config.conveyor.input_file
